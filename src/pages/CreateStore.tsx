@@ -1,31 +1,30 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Upload, Store, User, Mail, Phone, MapPin, FileText, CheckCircle2, ArrowLeft } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { useUser } from '@clerk/clerk-react';
+import { Upload, Store, User, Mail, FileText, CheckCircle2, ArrowLeft } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useToast } from '../ToastContext';
 import { cn } from '../utils';
+import { useUser } from '@clerk/clerk-react';
 
 export default function CreateStore() {
-  const { user } = useUser();
+  const { user, isLoaded } = useUser();
+  const navigate = useNavigate();
   const { showToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [logo, setLogo] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
-    storeName: '',
+    name: '',
     description: '',
-    email: '',
-    contactNumber: '',
-    address: ''
+    email: ''
   });
 
   useEffect(() => {
     window.scrollTo(0, 0);
-    if (user) {
+    if (isLoaded && user) {
       setFormData(prev => ({ ...prev, email: user.primaryEmailAddress?.emailAddress || '' }));
     }
-  }, [user]);
+  }, [isLoaded, user]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -45,10 +44,7 @@ export default function CreateStore() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) {
-      showToast('Please sign in to create a store', 'error');
-      return;
-    }
+    
     if (!logo) {
       showToast('Please upload a store logo', 'error');
       return;
@@ -62,8 +58,8 @@ export default function CreateStore() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          clerkId: user.id,
-          logoUrl: logo,
+          clerkId: user?.id || 'guest_store_owner',
+          logo: logo,
           ...formData
         }),
       });
@@ -72,11 +68,9 @@ export default function CreateStore() {
         showToast('Your store request has been submitted successfully. Please wait for admin approval.', 'success');
         // Reset form
         setFormData({
-          storeName: '',
+          name: '',
           description: '',
-          email: user.primaryEmailAddress?.emailAddress || '',
-          contactNumber: '',
-          address: ''
+          email: user.primaryEmailAddress?.emailAddress || ''
         });
         setLogo(null);
       } else {
@@ -193,10 +187,10 @@ export default function CreateStore() {
                       </div>
                       <input
                         type="text"
-                        name="storeName"
+                        name="name"
                         required
                         placeholder="My Awesome Store"
-                        value={formData.storeName}
+                        value={formData.name}
                         onChange={handleInputChange}
                         className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-transparent rounded-2xl focus:outline-none focus:bg-white focus:border-emerald-600 transition-all font-medium text-sm"
                       />
@@ -223,7 +217,7 @@ export default function CreateStore() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 gap-6">
                   {/* Email */}
                   <div className="space-y-2">
                     <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1">Email</label>
@@ -241,44 +235,6 @@ export default function CreateStore() {
                         className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-transparent rounded-2xl focus:outline-none focus:bg-white focus:border-emerald-600 transition-all font-medium text-sm"
                       />
                     </div>
-                  </div>
-
-                  {/* Contact Number */}
-                  <div className="space-y-2">
-                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1">Contact Number</label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-400">
-                        <Phone size={18} />
-                      </div>
-                      <input
-                        type="tel"
-                        name="contactNumber"
-                        required
-                        placeholder="+1 (555) 000-0000"
-                        value={formData.contactNumber}
-                        onChange={handleInputChange}
-                        className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-transparent rounded-2xl focus:outline-none focus:bg-white focus:border-emerald-600 transition-all font-medium text-sm"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Address */}
-                <div className="space-y-2">
-                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1">Address</label>
-                  <div className="relative">
-                    <div className="absolute top-4 left-4 text-gray-400">
-                      <MapPin size={18} />
-                    </div>
-                    <textarea
-                      name="address"
-                      required
-                      rows={2}
-                      placeholder="Enter your store address"
-                      value={formData.address}
-                      onChange={handleInputChange}
-                      className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-transparent rounded-2xl focus:outline-none focus:bg-white focus:border-emerald-600 transition-all font-medium text-sm resize-none"
-                    />
                   </div>
                 </div>
 

@@ -2,12 +2,12 @@ import { Request, Response } from 'express';
 import pool from '../config/db.js';
 
 export const addProduct = async (req: Request, res: Response) => {
-  const { storeId, name, description, price, offerPrice, category, stock, imageUrls } = req.body;
+  const { storeId, name, description, price, offer_price, category, stock, image } = req.body;
 
   try {
     const result = await pool.query(
-      'INSERT INTO products (store_id, name, description, price, offer_price, category, stock, image_urls) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
-      [storeId, name, description, price, offerPrice, category, stock, imageUrls]
+      'INSERT INTO products (store_id, name, description, price, offer_price, category, stock, image) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
+      [storeId, name, description, price, offer_price, category, stock, image]
     );
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -17,9 +17,9 @@ export const addProduct = async (req: Request, res: Response) => {
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
-    // Only show products from approved stores
+    // Only show products from approved stores, include store logo
     const result = await pool.query(`
-      SELECT p.* FROM products p
+      SELECT p.*, s.logo as store_logo FROM products p
       JOIN stores s ON p.store_id = s.id
       WHERE s.status = 'approved'
     `);
@@ -29,10 +29,25 @@ export const getProducts = async (req: Request, res: Response) => {
   }
 };
 
+export const getProductsByStoreId = async (req: Request, res: Response) => {
+  const { storeId } = req.params;
+  try {
+    const result = await pool.query('SELECT * FROM products WHERE store_id = $1', [storeId]);
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Database error' });
+  }
+};
+
 export const getProductById = async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
-    const result = await pool.query('SELECT * FROM products WHERE id = $1', [id]);
+    const result = await pool.query(`
+      SELECT p.*, s.name as store_name, s.logo as store_logo, s.tie_up_date
+      FROM products p
+      JOIN stores s ON p.store_id = s.id
+      WHERE p.id = $1
+    `, [id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Product not found' });
     }

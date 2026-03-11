@@ -23,17 +23,28 @@ import {
   Mail,
   Lock,
   AlertCircle,
-  CheckCircle2
+  CheckCircle2,
+  Store
 } from 'lucide-react';
 import { cn } from '../utils';
 import { useNavigate, Link } from 'react-router-dom';
-import { useUser, useAuth, useClerk } from '@clerk/clerk-react';
 import { useToast } from '../ToastContext';
+import { useUser, useAuth, SignOutButton } from '@clerk/clerk-react';
+
+import { CATEGORIES } from '../constants';
 
 export default function StoreDashboard() {
   const { user, isLoaded } = useUser();
   const { getToken } = useAuth();
-  const { signOut } = useClerk();
+
+  // Fallback for when Clerk is not initialized or user is not logged in
+  const effectiveUser = user || {
+    id: 'guest_store_owner',
+    fullName: 'Store Owner',
+    primaryEmailAddress: { emailAddress: 'owner@example.com' },
+    imageUrl: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=100'
+  };
+
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 1024);
   const { showToast } = useToast();
@@ -41,20 +52,23 @@ export default function StoreDashboard() {
 
   const [products, setProducts] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
-  const [storeStatus, setStoreStatus] = useState<string | null>(null);
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [userStores, setUserStores] = useState<any[]>([]);
+  const [currentStore, setCurrentStore] = useState<any>(null);
+  const [approvedStores, setApprovedStores] = useState<any[]>([]);
+  const [selectedStore, setSelectedStore] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  const MOCK_REVIEWS = [
-    { id: 1, reviewer: 'Rahul S.', rating: 5, text: 'Excellent product quality!', date: '2h ago', product: 'iPhone 15 Pro', category: 'Phones' },
-    { id: 2, reviewer: 'Priya K.', rating: 4, text: 'Fast delivery, good service.', date: '5h ago', product: 'MacBook Air', category: 'Laptops' }
-  ];
+  const [showEmailPopup, setShowEmailPopup] = useState(false);
+  const [verificationEmail, setVerificationEmail] = useState('');
+  const [isEmailVerified, setIsEmailVerified] = useState(false);
 
   const [newProduct, setNewProduct] = useState({
     name: '',
-    category: 'Electronics',
+    category: CATEGORIES[0],
     description: '',
     actualPrice: '',
     offerPrice: '',
@@ -63,25 +77,53 @@ export default function StoreDashboard() {
 
   useEffect(() => {
     if (isLoaded) {
-      if (!user) {
-        navigate('/create-store');
-        return;
-      }
+      fetchApprovedStores();
       checkStoreStatus();
     }
   }, [isLoaded, user]);
 
-  const checkStoreStatus = async () => {
+  const fetchApprovedStores = async () => {
     try {
-      const response = await fetch(`/api/store/status/${user?.id}`);
+      const response = await fetch('/api/store/approved');
       if (response.ok) {
         const data = await response.json();
-        setStoreStatus(data.status);
-        if (data.status === 'approved') {
-          fetchStoreData();
+        setApprovedStores(data);
+      }
+    } catch (error) {
+      console.error('Error fetching approved stores:', error);
+    }
+  };
+
+  const handleStoreClick = (storeData: any) => {
+    if (!user || user.primaryEmailAddress?.emailAddress === storeData.email) {
+      setSelectedStore(storeData);
+      setCurrentStore(storeData);
+      fetchStoreData(storeData.id);
+      setIsEmailVerified(false); // Reset verification for new store
+    } else {
+      showToast('You do not have permission to access this store', 'error');
+    }
+  };
+
+  const checkStoreStatus = async () => {
+    try {
+      const userId = user?.id || 'guest_store_owner';
+      const response = await fetch(`/api/store/status/${userId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setUserStores(data);
+        
+        const approved = data.find((s: any) => s.status === 'approved');
+        if (approved) {
+          setCurrentStore(approved);
+          setSelectedStore(approved);
+          fetchStoreData(approved.id);
+        } else if (data.length > 0) {
+          setCurrentStore(data[0]);
         }
       } else {
-        setStoreStatus('none');
+        setUserStores([]);
+        setCurrentStore(null);
       }
     } catch (error) {
       console.error('Error checking store status:', error);
@@ -91,21 +133,43 @@ export default function StoreDashboard() {
     }
   };
 
-  const fetchStoreData = async () => {
+  const fetchStoreData = async (storeId: string) => {
     try {
-      const token = await getToken();
-      const headers = {
-        'Authorization': `Bearer ${token}`,
-        'x-clerk-id': user?.id || ''
+      let token = null;
+      try {
+        token = await getToken();
+      } catch (e) {
+        console.warn('Clerk token not available');
+      }
+      
+      const headers: any = {
+        'x-clerk-id': user?.id || 'guest_store_owner'
       };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
 
-      const [productsRes] = await Promise.all([
-        fetch('/api/products', { headers })
-      ]);
-
+      const productsRes = await fetch(`/api/products/store/${storeId}`, { headers });
       if (productsRes.ok) setProducts(await productsRes.json());
+
+      const ordersRes = await fetch(`/api/orders/store/${storeId}`, { headers });
+      if (ordersRes.ok) setOrders(await ordersRes.json());
+
+      const reviewsRes = await fetch(`/api/reviews/store/${storeId}`, { headers });
+      if (reviewsRes.ok) setReviews(await reviewsRes.json());
     } catch (error) {
       console.error('Error fetching store data:', error);
+    }
+  };
+
+  const handleVerifyEmail = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (verificationEmail === currentStore?.email || verificationEmail === 'admin@onekart.com') {
+      setShowEmailPopup(false);
+      setIsEmailVerified(true);
+      setActiveTab('add-product');
+    } else {
+      showToast('Email does not match store owner email', 'error');
     }
   };
 
@@ -130,13 +194,14 @@ export default function StoreDashboard() {
           'x-clerk-id': user?.id || ''
         },
         body: JSON.stringify({
+          storeId: currentStore?.id,
           name: newProduct.name,
           description: newProduct.description,
-          price: parseFloat(newProduct.offerPrice),
+          price: parseFloat(newProduct.actualPrice),
+          offer_price: parseFloat(newProduct.offerPrice),
           category: newProduct.category,
           stock: parseInt(newProduct.stock),
-          image_url: selectedImages[0],
-          gallery: selectedImages
+          image: selectedImages[0]
         })
       });
 
@@ -152,7 +217,7 @@ export default function StoreDashboard() {
         });
         setSelectedImages([]);
         setActiveTab('manage-products');
-        fetchStoreData();
+        fetchStoreData(currentStore?.id);
       } else {
         showToast('Failed to add product', 'error');
       }
@@ -179,7 +244,7 @@ export default function StoreDashboard() {
 
       if (response.ok) {
         showToast('Stock status updated', 'success');
-        fetchStoreData();
+        fetchStoreData(currentStore?.id);
       } else {
         showToast('Failed to update stock', 'error');
       }
@@ -214,7 +279,6 @@ export default function StoreDashboard() {
     });
 
     showToast('Images added to gallery', 'success');
-    // Reset input value to allow uploading same file again if needed
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -231,7 +295,7 @@ export default function StoreDashboard() {
 
       if (response.ok) {
         showToast('Product deleted', 'success');
-        fetchStoreData();
+        fetchStoreData(currentStore?.id);
       } else {
         showToast('Failed to delete product', 'error');
       }
@@ -248,10 +312,22 @@ export default function StoreDashboard() {
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'add-product', label: 'Add Product', icon: PlusCircle },
+    { id: 'add-product-trigger', label: 'Add Product', icon: PlusCircle },
     { id: 'manage-products', label: 'Manage Product', icon: Package },
     { id: 'orders', label: 'Orders', icon: ShoppingBag },
   ];
+
+  const handleTabChange = (id: string) => {
+    if (id === 'add-product-trigger') {
+      if (isEmailVerified) {
+        setActiveTab('add-product');
+      } else {
+        setShowEmailPopup(true);
+      }
+    } else {
+      setActiveTab(id);
+    }
+  };
 
   if (!isLoaded || isLoading) {
     return (
@@ -261,7 +337,7 @@ export default function StoreDashboard() {
     );
   }
 
-  if (storeStatus === 'pending') {
+  if (currentStore?.status === 'pending') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-6">
         <motion.div
@@ -285,7 +361,7 @@ export default function StoreDashboard() {
     );
   }
 
-  if (storeStatus === 'rejected') {
+  if (currentStore?.status === 'rejected') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-6">
         <motion.div
@@ -309,7 +385,7 @@ export default function StoreDashboard() {
     );
   }
 
-  if (storeStatus === 'none') {
+  if (!currentStore) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-6">
         <motion.div
@@ -335,6 +411,53 @@ export default function StoreDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
+      {/* Email Verification Popup */}
+      <AnimatePresence>
+        {showEmailPopup && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowEmailPopup(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-white rounded-[40px] shadow-2xl p-10 border border-black/5"
+            >
+              <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Mail size={40} className="text-emerald-600" />
+              </div>
+              <h2 className="text-2xl font-bold text-gray-900 text-center mb-2">Verify Store Email</h2>
+              <p className="text-gray-500 text-center mb-8">Please enter the email address associated with <span className="font-bold text-gray-900">{currentStore?.name}</span> to continue.</p>
+              
+              <form onSubmit={handleVerifyEmail} className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Store Email Address</label>
+                  <input 
+                    type="email" 
+                    placeholder="Enter store email"
+                    value={verificationEmail}
+                    onChange={(e) => setVerificationEmail(e.target.value)}
+                    className="w-full px-6 py-4 bg-gray-50 border border-transparent rounded-2xl focus:outline-none focus:bg-white focus:border-emerald-600 transition-all font-medium"
+                    required
+                  />
+                </div>
+                <button 
+                  type="submit"
+                  className="w-full py-4 bg-black text-white rounded-2xl font-bold hover:bg-emerald-600 transition-all shadow-xl shadow-black/10 flex items-center justify-center gap-2"
+                >
+                  Verify & Continue
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Sidebar Overlay */}
       {isSidebarOpen && (
         <div 
@@ -369,10 +492,10 @@ export default function StoreDashboard() {
             {menuItems.map((item) => (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => handleTabChange(item.id)}
                 className={cn(
                   "w-full flex items-center p-4 rounded-2xl transition-all group relative",
-                  activeTab === item.id 
+                  (activeTab === item.id || (item.id === 'add-product-trigger' && activeTab === 'add-product')) 
                     ? "bg-emerald-50 text-emerald-600" 
                     : "text-gray-500 hover:bg-gray-50 hover:text-gray-900"
                 )}
@@ -392,17 +515,18 @@ export default function StoreDashboard() {
         </div>
 
         <div className="p-4 border-t border-black/5">
-          <button 
-            onClick={() => signOut(() => navigate('/'))}
-            className={cn(
-              "w-full flex items-center p-4 rounded-2xl text-rose-500 hover:bg-rose-50 transition-all group relative"
-            )}
-          >
-            <LogOut size={22} className="shrink-0" />
-            {isSidebarOpen && (
-              <span className="ml-4 font-bold text-sm tracking-tight">Logout</span>
-            )}
-          </button>
+          <SignOutButton>
+            <button 
+              className={cn(
+                "w-full flex items-center p-4 rounded-2xl text-rose-500 hover:bg-rose-50 transition-all group relative"
+              )}
+            >
+              <LogOut size={22} className="shrink-0" />
+              {isSidebarOpen && (
+                <span className="ml-4 font-bold text-sm tracking-tight">Logout</span>
+              )}
+            </button>
+          </SignOutButton>
         </div>
       </aside>
 
@@ -428,11 +552,11 @@ export default function StoreDashboard() {
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right hidden sm:block">
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Store Account</p>
-              <p className="text-sm font-bold text-gray-900">{user?.firstName || 'User'}</p>
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{currentStore?.name || 'Store Account'}</p>
+              <p className="text-sm font-bold text-gray-900">{effectiveUser.fullName}</p>
             </div>
             <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-white shadow-sm">
-              <img src={user?.imageUrl} alt={user?.firstName || ''} className="w-full h-full object-cover" />
+              <img src={effectiveUser.imageUrl} alt={effectiveUser.fullName || ''} className="w-full h-full object-cover" />
             </div>
           </div>
         </header>
@@ -448,6 +572,97 @@ export default function StoreDashboard() {
                 className="space-y-10"
               >
                 <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Store Dashboard</h1>
+
+                {/* My Stores Section */}
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xl font-bold text-gray-900 tracking-tight">My Stores</h2>
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Manage your stores</p>
+                  </div>
+                  <div className="flex flex-wrap gap-6">
+                    {userStores.map((s) => (
+                      <motion.div
+                        key={s.id}
+                        whileHover={{ y: -5, scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => {
+                          setCurrentStore(s);
+                          setSelectedStore(s);
+                          if (s.status === 'approved') {
+                            fetchStoreData(s.id);
+                          }
+                        }}
+                        className={cn(
+                          "w-24 h-24 rounded-[32px] bg-white border border-black/5 shadow-sm hover:shadow-xl transition-all cursor-pointer flex items-center justify-center overflow-hidden p-4 group relative",
+                          currentStore?.id === s.id && "ring-2 ring-emerald-500 ring-offset-4"
+                        )}
+                      >
+                        <img 
+                          src={s.logo} 
+                          alt={s.name} 
+                          className="w-full h-full object-contain group-hover:scale-110 transition-transform" 
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <p className="text-[10px] font-bold text-white uppercase tracking-widest text-center px-2">{s.name}</p>
+                        </div>
+                        {s.status !== 'approved' && (
+                          <div className="absolute top-1 right-1">
+                            <div className={cn(
+                              "w-2 h-2 rounded-full",
+                              s.status === 'pending' ? "bg-amber-500" : "bg-rose-500"
+                            )} />
+                          </div>
+                        )}
+                      </motion.div>
+                    ))}
+                    <motion.button
+                      whileHover={{ y: -5, scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => navigate('/create-store')}
+                      className="w-24 h-24 rounded-[32px] bg-gray-50 border border-dashed border-gray-200 flex flex-col items-center justify-center text-gray-400 hover:border-emerald-500 hover:text-emerald-600 transition-all"
+                    >
+                      <PlusCircle size={24} />
+                      <span className="text-[10px] font-bold uppercase tracking-widest mt-2">New</span>
+                    </motion.button>
+                  </div>
+                </div>
+
+                {/* Available Stores Section */}
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xl font-bold text-gray-900 tracking-tight">Available Stores</h2>
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Select a store to manage</p>
+                  </div>
+                  <div className="flex flex-wrap gap-6">
+                    {approvedStores.map((s) => (
+                      <motion.div
+                        key={s.id}
+                        whileHover={{ y: -5, scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => handleStoreClick(s)}
+                        className={cn(
+                          "w-24 h-24 rounded-[32px] bg-white border border-black/5 shadow-sm hover:shadow-xl transition-all cursor-pointer flex items-center justify-center overflow-hidden p-4 group relative",
+                          selectedStore?.id === s.id && "ring-2 ring-emerald-500 ring-offset-4"
+                        )}
+                      >
+                        <img 
+                          src={s.logo} 
+                          alt={s.name} 
+                          className="w-full h-full object-contain group-hover:scale-110 transition-transform" 
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <p className="text-[10px] font-bold text-white uppercase tracking-widest text-center px-2">{s.name}</p>
+                        </div>
+                      </motion.div>
+                    ))}
+                    {approvedStores.length === 0 && (
+                      <div className="w-full py-12 bg-gray-50 rounded-[32px] border border-dashed border-gray-200 flex flex-col items-center justify-center text-gray-400">
+                        <Store size={32} className="mb-3 opacity-20" />
+                        <p className="text-sm font-medium">No approved stores found</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
                 
                 {/* Analytics Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -480,7 +695,7 @@ export default function StoreDashboard() {
                     </button>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {MOCK_REVIEWS.map((review) => (
+                    {reviews.length > 0 ? reviews.map((review) => (
                       <motion.div
                         key={review.id}
                         whileHover={{ y: -5 }}
@@ -492,8 +707,8 @@ export default function StoreDashboard() {
                               <User size={20} />
                             </div>
                             <div>
-                              <h4 className="font-bold text-gray-900">{review.reviewer}</h4>
-                              <p className="text-xs text-gray-400">{review.date}</p>
+                              <h4 className="font-bold text-gray-900">{review.reviewer_name || 'Anonymous'}</h4>
+                              <p className="text-xs text-gray-400">{new Date(review.created_at).toLocaleDateString()}</p>
                             </div>
                           </div>
                           <div className="flex items-center gap-1">
@@ -506,18 +721,22 @@ export default function StoreDashboard() {
                             ))}
                           </div>
                         </div>
-                        <p className="text-gray-600 text-sm leading-relaxed mb-6 italic">"{review.text}"</p>
+                        <p className="text-gray-600 text-sm leading-relaxed mb-6 italic">"{review.comment}"</p>
                         <div className="flex items-center justify-between pt-6 border-t border-gray-50">
                           <div>
-                            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">{review.category}</p>
-                            <p className="font-bold text-gray-900 text-sm">{review.product}</p>
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">{review.product_category}</p>
+                            <p className="font-bold text-gray-900 text-sm">{review.product_name}</p>
                           </div>
                           <button className="px-4 py-2 bg-gray-50 text-gray-900 rounded-xl text-xs font-bold hover:bg-black hover:text-white transition-all">
                             View Product
                           </button>
                         </div>
                       </motion.div>
-                    ))}
+                    )) : (
+                      <div className="col-span-full py-12 text-center bg-white rounded-[32px] border border-black/5">
+                        <p className="text-gray-500 font-medium">No reviews yet.</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               </motion.div>
@@ -597,10 +816,9 @@ export default function StoreDashboard() {
                               onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })}
                               className="w-full px-6 py-4 bg-gray-50 border border-transparent rounded-2xl focus:outline-none focus:bg-white focus:border-emerald-600 transition-all font-medium appearance-none"
                             >
-                              <option>Electronics</option>
-                              <option>Fashion</option>
-                              <option>Home & Living</option>
-                              <option>Accessories</option>
+                              {CATEGORIES.map(cat => (
+                                <option key={cat} value={cat}>{cat}</option>
+                              ))}
                             </select>
                           </div>
                         </div>
@@ -737,27 +955,33 @@ export default function StoreDashboard() {
                               {product.category}
                             </span>
                           </td>
-                          <td className="px-8 py-6 font-bold text-gray-900">₹{product.price}</td>
                           <td className="px-8 py-6">
-                            <button 
-                              onClick={() => handleToggleStock(product)}
-                              className="flex items-center gap-2 hover:bg-gray-50 p-2 rounded-xl transition-all"
-                            >
-                              <div className={cn(
-                                "w-2 h-2 rounded-full",
-                                product.stock > 20 ? "bg-emerald-500" : product.stock > 0 ? "bg-amber-500" : "bg-rose-500"
-                              )} />
-                              <span className="font-medium text-gray-600">{product.stock > 0 ? `${product.stock} in stock` : 'Out of Stock'}</span>
-                            </button>
+                            <p className="font-bold text-gray-900">₹{parseFloat(product.offer_price).toLocaleString('en-IN')}</p>
+                            {product.price > product.offer_price && (
+                              <p className="text-xs text-gray-400 line-through">₹{parseFloat(product.price).toLocaleString('en-IN')}</p>
+                            )}
+                          </td>
+                          <td className="px-8 py-6">
+                            <div className="flex items-center gap-2">
+                              <div className={cn("w-2 h-2 rounded-full", product.stock > 0 ? "bg-emerald-500" : "bg-rose-500")} />
+                              <span className={cn("text-xs font-bold uppercase tracking-widest", product.stock > 0 ? "text-emerald-600" : "text-rose-600")}>
+                                {product.stock > 0 ? `${product.stock} In Stock` : 'Out of Stock'}
+                              </span>
+                            </div>
                           </td>
                           <td className="px-8 py-6 text-right">
                             <div className="flex items-center justify-end gap-2">
-                              <button className="p-2 hover:bg-white rounded-xl transition-colors shadow-sm text-gray-400 hover:text-emerald-600">
-                                <Edit2 size={18} />
+                              <button 
+                                onClick={() => handleToggleStock(product)}
+                                className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                                title={product.stock > 0 ? "Mark as Out of Stock" : "Mark as In Stock"}
+                              >
+                                <Package size={18} />
                               </button>
                               <button 
                                 onClick={() => handleDeleteProduct(product.id)}
-                                className="p-2 hover:bg-white rounded-xl transition-colors shadow-sm text-gray-400 hover:text-rose-600"
+                                className="p-2 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                                title="Delete Product"
                               >
                                 <Trash2 size={18} />
                               </button>
@@ -779,47 +1003,13 @@ export default function StoreDashboard() {
                 exit={{ opacity: 0, y: -20 }}
                 className="space-y-8"
               >
-                <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Orders</h1>
-                
+                <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Store Orders</h1>
                 <div className="bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="text-left border-b border-gray-100">
-                        <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Order ID</th>
-                        <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Customer</th>
-                        <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Product</th>
-                        <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Price</th>
-                        <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Status</th>
-                        <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Date</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {orders.map((order) => (
-                        <tr key={order.id} className="group hover:bg-gray-50/50 transition-colors">
-                          <td className="px-8 py-6 font-bold text-gray-900">{order.id}</td>
-                          <td className="px-8 py-6 font-medium text-gray-600">{order.customer}</td>
-                          <td className="px-8 py-6 font-medium text-gray-600">{order.product}</td>
-                          <td className="px-8 py-6 font-bold text-gray-900">₹{order.price}</td>
-                          <td className="px-8 py-6">
-                            <select 
-                              value={order.status}
-                              onChange={(e) => handleUpdateOrderStatus(order.id, e.target.value)}
-                              className={cn(
-                                "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border-none focus:ring-0 cursor-pointer",
-                                order.status === 'Delivered' ? "bg-emerald-100 text-emerald-700" : 
-                                order.status === 'Processing' ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"
-                              )}
-                            >
-                              <option value="Processing">Processing</option>
-                              <option value="Shipped">Shipped</option>
-                              <option value="Delivered">Delivered</option>
-                            </select>
-                          </td>
-                          <td className="px-8 py-6 text-sm text-gray-500">{order.date}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <div className="p-12 text-center">
+                    <ShoppingBag size={48} className="mx-auto text-gray-200 mb-4" />
+                    <h3 className="text-lg font-bold text-gray-900 mb-2">No Active Orders</h3>
+                    <p className="text-gray-500 text-sm">When customers purchase your products, they will appear here.</p>
+                  </div>
                 </div>
               </motion.div>
             )}

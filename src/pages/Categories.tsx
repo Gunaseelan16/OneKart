@@ -1,38 +1,53 @@
 import { motion } from 'motion/react';
-import { ArrowRight, Laptop, Watch, Shirt, Smartphone } from 'lucide-react';
+import { ArrowRight, Laptop, Watch, Shirt, Smartphone, ShoppingBag, Dumbbell, Home, Book, Music, Heart, Footprints } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { cn } from '../utils';
+import { CATEGORIES } from '../constants';
 
-const CATEGORY_DATA = [
-  {
-    name: 'Electronics',
-    count: 124,
-    image: 'https://images.unsplash.com/photo-1498049794561-7780e7231661?auto=format&fit=crop&q=80&w=800',
-    icon: Laptop,
-    color: 'bg-blue-500'
-  },
-  {
-    name: 'Watches',
-    count: 85,
-    image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&q=80&w=800',
-    icon: Watch,
-    color: 'bg-amber-500'
-  },
-  {
-    name: 'Clothes',
-    count: 210,
-    image: 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&q=80&w=800',
-    icon: Shirt,
-    color: 'bg-emerald-500'
-  },
-  {
-    name: 'Gadgets',
-    count: 56,
-    image: 'https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?auto=format&fit=crop&q=80&w=800',
-    icon: Smartphone,
-    color: 'bg-purple-500'
-  }
-];
+const CATEGORY_ICONS: Record<string, any> = {
+  'Electronics': Laptop,
+  'Watches': Watch,
+  'Clothes': Shirt,
+  'Gadgets': Smartphone,
+  'Bags': ShoppingBag,
+  'Gym Equipment': Dumbbell,
+  'Furniture': Home,
+  'Books': Book,
+  'Sports': Music,
+  'Ladies Beauty': Heart,
+  'Mens Beauty': Heart,
+  'Footwear': Footprints,
+};
+
+const CATEGORY_COLORS: Record<string, string> = {
+  'Electronics': 'bg-blue-500',
+  'Watches': 'bg-amber-500',
+  'Clothes': 'bg-emerald-500',
+  'Gadgets': 'bg-purple-500',
+  'Bags': 'bg-pink-500',
+  'Gym Equipment': 'bg-orange-500',
+  'Furniture': 'bg-stone-500',
+  'Books': 'bg-indigo-500',
+  'Sports': 'bg-red-500',
+  'Ladies Beauty': 'bg-rose-500',
+  'Mens Beauty': 'bg-cyan-500',
+  'Footwear': 'bg-lime-500',
+};
+
+const CATEGORY_IMAGES: Record<string, string> = {
+  'Electronics': 'https://images.unsplash.com/photo-1498049794561-7780e7231661?auto=format&fit=crop&q=80&w=800',
+  'Watches': 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&q=80&w=800',
+  'Clothes': 'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&q=80&w=800',
+  'Gadgets': 'https://images.unsplash.com/photo-1511467687858-23d96c32e4ae?auto=format&fit=crop&q=80&w=800',
+  'Bags': 'https://images.unsplash.com/photo-1548036328-c9fa89d128fa?auto=format&fit=crop&q=80&w=800',
+  'Gym Equipment': 'https://images.unsplash.com/photo-1586406472616-b459ad4933e2?auto=format&fit=crop&q=80&w=800',
+  'Furniture': 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?auto=format&fit=crop&q=80&w=800',
+  'Books': 'https://images.unsplash.com/photo-1495446815901-a7297e633e8d?auto=format&fit=crop&q=80&w=800',
+  'Sports': 'https://images.unsplash.com/photo-1461896704190-32137b238a79?auto=format&fit=crop&q=80&w=800',
+  'Ladies Beauty': 'https://images.unsplash.com/photo-1556228578-0d85b1a4d571?auto=format&fit=crop&q=80&w=800',
+  'Mens Beauty': 'https://images.unsplash.com/photo-1556229162-5c63ed9c4efb?auto=format&fit=crop&q=80&w=800',
+  'Footwear': 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&q=80&w=800',
+};
 
 export default function Categories() {
   return (
@@ -45,40 +60,46 @@ export default function Categories() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {CATEGORY_DATA.map((category, i) => (
-            <motion.div
-              key={category.name}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.1 }}
-              className="group relative h-[400px] rounded-[40px] overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500"
-            >
-              <img
-                src={category.image}
-                alt={category.name}
-                className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-                referrerPolicy="no-referrer"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
-              
-              <div className="absolute bottom-0 left-0 right-0 p-10 flex items-end justify-between">
-                <div className="text-white">
-                  <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center mb-4 shadow-lg", category.color)}>
-                    <category.icon size={24} />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          {CATEGORIES.map((categoryName, i) => {
+            const Icon = CATEGORY_ICONS[categoryName] || ShoppingBag;
+            const color = CATEGORY_COLORS[categoryName] || 'bg-emerald-500';
+            const image = CATEGORY_IMAGES[categoryName] || 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&q=80&w=800';
+
+            return (
+              <motion.div
+                key={categoryName}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.05 }}
+                className="group relative h-[300px] rounded-[40px] overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500"
+              >
+                <img
+                  src={image}
+                  alt={categoryName}
+                  className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
+                
+                <div className="absolute bottom-0 left-0 right-0 p-8 flex items-end justify-between">
+                  <div className="text-white">
+                    <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center mb-3 shadow-lg", color)}>
+                      <Icon size={20} />
+                    </div>
+                    <h3 className="text-2xl font-bold mb-1 tracking-tight">{categoryName}</h3>
+                    <p className="text-gray-300 text-xs">Explore Collection</p>
                   </div>
-                  <h3 className="text-3xl font-bold mb-2 tracking-tight">{category.name}</h3>
-                  <p className="text-gray-300 text-sm">{category.count} Products Available</p>
+                  <Link
+                    to={`/shop?category=${categoryName}`}
+                    className="w-12 h-12 bg-white text-black rounded-xl flex items-center justify-center hover:bg-emerald-600 hover:text-white transition-all shadow-xl group/btn"
+                  >
+                    <ArrowRight size={20} className="group-hover/btn:translate-x-1 transition-transform" />
+                  </Link>
                 </div>
-                <Link
-                  to={`/shop?category=${category.name}`}
-                  className="w-14 h-14 bg-white text-black rounded-2xl flex items-center justify-center hover:bg-emerald-600 hover:text-white transition-all shadow-xl group/btn"
-                >
-                  <ArrowRight size={24} className="group-hover/btn:translate-x-1 transition-transform" />
-                </Link>
-              </div>
-            </motion.div>
-          ))}
+              </motion.div>
+            );
+          })}
         </div>
 
         {/* Featured Banner */}

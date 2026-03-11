@@ -4,14 +4,11 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../utils';
 import { useCart } from '../CartContext';
-import { useUser, UserButton, useClerk } from '@clerk/clerk-react';
 
 export default function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const { cartCount } = useCart();
-  const { user, isLoaded, isSignedIn } = useUser();
-  const { signOut } = useClerk();
   const location = useLocation();
 
   useEffect(() => {
@@ -59,9 +56,6 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center space-x-2 sm:space-x-5">
-          <button className="p-2 hover:bg-black/5 rounded-full transition-colors hidden sm:block">
-            <Search size={20} />
-          </button>
           <Link to="/wishlist" className="p-2 hover:bg-black/5 rounded-full transition-colors relative">
             <Heart size={20} />
           </Link>
@@ -74,15 +68,9 @@ export default function Navbar() {
             )}
           </Link>
           
-          {isLoaded && isSignedIn ? (
-            <div className="flex items-center space-x-2 sm:space-x-3">
-              <UserButton afterSignOutUrl="/" />
-            </div>
-          ) : (
-            <Link to="/auth" className="p-2 hover:bg-black/5 rounded-full transition-colors">
-              <UserIcon size={20} />
-            </Link>
-          )}
+          <Link to="/profile" className="p-2 hover:bg-black/5 rounded-full transition-colors">
+            <UserIcon size={20} />
+          </Link>
 
           <button
             className="lg:hidden p-2 hover:bg-black/5 rounded-full transition-colors"
@@ -120,25 +108,10 @@ export default function Navbar() {
                 <Heart size={20} className="mr-2 text-emerald-600" />
                 Wishlist
               </Link>
-              {isLoaded && isSignedIn ? (
-                <>
-                  <Link to="/profile" onClick={() => setIsMenuOpen(false)} className="text-lg font-medium flex items-center">
-                    <UserIcon size={20} className="mr-2 text-emerald-600" />
-                    Profile
-                  </Link>
-                  <button 
-                    onClick={() => {
-                      signOut();
-                      setIsMenuOpen(false);
-                    }}
-                    className="text-lg font-medium text-red-500 text-left"
-                  >
-                    Logout
-                  </button>
-                </>
-              ) : (
-                <Link to="/auth" onClick={() => setIsMenuOpen(false)} className="text-lg font-medium">Login</Link>
-              )}
+              <Link to="/profile" onClick={() => setIsMenuOpen(false)} className="text-lg font-medium flex items-center">
+                <UserIcon size={20} className="mr-2 text-emerald-600" />
+                Profile
+              </Link>
             </div>
           </motion.div>
         )}

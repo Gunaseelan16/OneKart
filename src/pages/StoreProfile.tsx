@@ -1,23 +1,61 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Star, Users, Calendar, MapPin, Share2, Heart, Filter, Grid, List as ListIcon } from 'lucide-react';
-import { SAMPLE_PRODUCTS, SAMPLE_SELLERS } from '../constants';
 import ProductCard from '../components/ProductCard';
 
 export default function StoreProfile() {
-  const { brandName } = useParams();
+  const { brandName } = useParams(); // This is actually the storeId
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [seller, setSeller] = useState<any>(null);
+  const [products, setProducts] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const seller = useMemo(() => 
-    SAMPLE_SELLERS.find(s => s.brand === brandName) || SAMPLE_SELLERS[0],
-    [brandName]
-  );
+  useEffect(() => {
+    fetchStoreData();
+  }, [brandName]);
 
-  const products = useMemo(() => 
-    SAMPLE_PRODUCTS.filter(p => p.brand === brandName),
-    [brandName]
-  );
+  const fetchStoreData = async () => {
+    setIsLoading(true);
+    try {
+      // Fetch store details
+      const storeResponse = await fetch(`/api/store/${brandName}`);
+      if (storeResponse.ok) {
+        const storeData = await storeResponse.json();
+        setSeller(storeData);
+      }
+
+      // Fetch store products
+      const productsResponse = await fetch(`/api/products/store/${brandName}`);
+      if (productsResponse.ok) {
+        const productsData = await productsResponse.json();
+        setProducts(productsData);
+      }
+    } catch (error) {
+      console.error('Error fetching store data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="pt-32 pb-20 min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!seller) {
+    return (
+      <div className="pt-32 pb-20 min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">Store not found</h2>
+          <Link to="/stores" className="text-emerald-600 font-bold">Back to Stores</Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="pt-24 pb-20 bg-gray-50 min-h-screen">
@@ -36,11 +74,11 @@ export default function StoreProfile() {
       <div className="max-w-7xl mx-auto px-6 -mt-24 relative z-10">
         <div className="bg-white rounded-[40px] p-8 md:p-12 shadow-xl border border-black/5 mb-12">
           <div className="flex flex-col md:flex-row gap-10 items-start md:items-center">
-            <div className="w-32 h-32 md:w-40 md:h-40 rounded-[32px] overflow-hidden border-4 border-white shadow-2xl bg-white">
+            <div className="w-32 h-32 md:w-40 md:h-40 rounded-[32px] overflow-hidden border-4 border-white shadow-2xl bg-white p-4">
               <img
                 src={seller.logo}
                 alt={seller.name}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-contain"
                 referrerPolicy="no-referrer"
               />
             </div>
@@ -50,7 +88,7 @@ export default function StoreProfile() {
                 <h1 className="text-4xl font-bold text-gray-900 tracking-tight">{seller.name}</h1>
                 <div className="flex items-center gap-1 px-3 py-1 bg-amber-50 text-amber-600 rounded-full text-xs font-bold">
                   <Star size={12} fill="currentColor" />
-                  {seller.rating} (4.5k Reviews)
+                  {seller.rating || '4.5'} (4.5k Reviews)
                 </div>
                 <span className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-bold uppercase tracking-widest">Verified Mall</span>
               </div>
@@ -62,11 +100,11 @@ export default function StoreProfile() {
               <div className="flex flex-wrap gap-6 text-sm text-gray-400">
                 <div className="flex items-center gap-2">
                   <Users size={18} className="text-emerald-600" />
-                  <span className="font-bold text-gray-900">{seller.followers}</span> Followers
+                  <span className="font-bold text-gray-900">{seller.followers || '1.2k'}</span> Followers
                 </div>
                 <div className="flex items-center gap-2">
                   <Calendar size={18} className="text-emerald-600" />
-                  Joined <span className="font-bold text-gray-900">{seller.joinedDate}</span>
+                  Joined <span className="font-bold text-gray-900">{new Date(seller.created_at).getFullYear()}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <MapPin size={18} className="text-emerald-600" />

@@ -1,21 +1,89 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { Heart, ShoppingCart, Trash2, ArrowRight } from 'lucide-react';
+import { Heart, ShoppingCart, Trash2, ArrowRight, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { SAMPLE_PRODUCTS } from '../constants';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useCart } from '../CartContext';
+import { toast } from 'react-hot-toast';
+import { useUser } from '@clerk/clerk-react';
+
+interface WishlistItem {
+  id: string;
+  name: string;
+  price: number;
+  image: string;
+  category: string;
+}
 
 export default function Wishlist() {
-  // Mock wishlist items
-  const [wishlist, setWishlist] = useState([
-    SAMPLE_PRODUCTS[2],
-    SAMPLE_PRODUCTS[5],
-  ]);
+  const { user, isLoaded } = useUser();
+  const [wishlist, setWishlist] = useState<WishlistItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const { addToCart } = useCart();
 
-  const removeFromWishlist = (id: string) => {
-    setWishlist(items => items.filter(item => item.id !== id));
+  useEffect(() => {
+    if (isLoaded && user) {
+      fetchWishlist();
+    } else if (isLoaded && !user) {
+      setLoading(false);
+    }
+  }, [isLoaded, user]);
+
+  const fetchWishlist = async () => {
+    try {
+      const response = await fetch(`/api/user/wishlist/${user?.id}`);
+      if (!response.ok) throw new Error('Failed to fetch wishlist');
+      const data = await response.json();
+      setWishlist(data);
+    } catch (error) {
+      console.error('Error fetching wishlist:', error);
+      toast.error('Failed to load wishlist');
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const removeFromWishlist = async (productId: string) => {
+    if (!user) return;
+    try {
+      const response = await fetch(`/api/user/wishlist/${user.id}/${productId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        setWishlist(items => items.filter(item => item.id !== productId));
+        toast.success('Removed from wishlist');
+      } else {
+        throw new Error('Failed to remove from wishlist');
+      }
+    } catch (error) {
+      console.error('Error removing from wishlist:', error);
+      toast.error('Failed to remove from wishlist');
+    }
+  };
+
+  if (!isLoaded || loading) {
+    return (
+      <div className="pt-32 pb-20 flex items-center justify-center min-h-screen">
+        <Loader2 className="animate-spin text-emerald-600" size={48} />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="pt-32 pb-20 bg-gray-50 min-h-screen">
+        <div className="max-w-7xl mx-auto px-6 text-center">
+          <div className="bg-white p-12 rounded-[40px] border border-black/5 shadow-sm">
+            <Heart size={48} className="mx-auto mb-6 text-gray-300" />
+            <h2 className="text-2xl font-bold mb-4">Please sign in to view your wishlist</h2>
+            <Link to="/auth" className="inline-block px-8 py-4 bg-black text-white rounded-2xl font-bold hover:bg-emerald-600 transition-all">
+              Sign In
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="pt-32 pb-20 bg-gray-50 min-h-screen">
@@ -40,7 +108,12 @@ export default function Wishlist() {
                   className="bg-white rounded-[32px] overflow-hidden border border-black/5 shadow-sm hover:shadow-xl transition-all duration-300 group"
                 >
                   <div className="relative aspect-[4/3] overflow-hidden bg-gray-100">
-                    <img src={item.image} alt={item.name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" referrerPolicy="no-referrer" />
+                    <img 
+                      src={item.image} 
+                      alt={item.name} 
+                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" 
+                      referrerPolicy="no-referrer" 
+                    />
                     <button
                       onClick={() => removeFromWishlist(item.id)}
                       className="absolute top-4 right-4 p-2 bg-white/80 backdrop-blur-sm rounded-full text-gray-400 hover:text-red-500 shadow-sm transition-all"
@@ -56,7 +129,7 @@ export default function Wishlist() {
                     <h3 className="font-bold text-gray-900 mb-4 truncate">{item.name}</h3>
                     <div className="flex gap-3">
                       <button
-                        onClick={() => addToCart(item)}
+                        onClick={() => addToCart({ ...item, id: item.id } as any)}
                         className="flex-1 py-3 bg-black text-white rounded-2xl font-bold text-sm hover:bg-emerald-600 transition-all flex items-center justify-center"
                       >
                         <ShoppingCart size={16} className="mr-2" />

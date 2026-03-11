@@ -1,31 +1,163 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { CreditCard, Truck, ShieldCheck, ArrowRight, CheckCircle2, MapPin, Wallet, Smartphone } from 'lucide-react';
-import { useState } from 'react';
+import { CreditCard, Truck, ShieldCheck, ArrowRight, CheckCircle2, MapPin, Wallet, Smartphone, Loader2, Plus } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { useCart } from '../CartContext';
 import { Link, useNavigate } from 'react-router-dom';
 import { cn } from '../utils';
+import { toast } from 'react-hot-toast';
 import { useUser } from '@clerk/clerk-react';
 
+interface Address {
+  id: string;
+  type: string;
+  street: string;
+  city: string;
+  state: string;
+  zip_code: string;
+  country: string;
+  is_default: boolean;
+}
+
 export default function Checkout() {
-  const { cart, cartTotal, clearCart } = useCart();
-  const { user } = useUser();
+  const { cart, cartTotal, clearCart, coupon, applyCoupon, removeCoupon, discountedTotal } = useCart();
+  const { user, isLoaded } = useUser();
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'gpay' | 'cod'>('card');
-  const [selectedAddressId, setSelectedAddressId] = useState('1');
+  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
+  const [loadingAddresses, setLoadingAddresses] = useState(true);
+  const [orderId, setOrderId] = useState<string | null>(null);
+  const [couponCode, setCouponCode] = useState('');
+  const [isValidatingCoupon, setIsValidatingCoupon] = useState(false);
 
-  const shipping = cartTotal > 1000 ? 0 : 500;
-  const total = cartTotal + shipping;
+  const shipping = discountedTotal > 1000 ? 0 : 500;
+  const total = discountedTotal + shipping;
 
-  const handleCheckout = () => {
+  useEffect(() => {
+    if (isLoaded) {
+      if (!user) {
+        toast.error('Please sign in to checkout');
+        navigate('/profile');
+        return;
+      }
+      fetchAddresses();
+    }
+  }, [isLoaded, user]);
+
+  const fetchAddresses = async () => {
+    if (!user) return;
+    try {
+      const response = await fetch(`/api/user/addresses/${user.id}`);
+      if (!response.ok) throw new Error('Failed to fetch addresses');
+      const data = await response.json();
+      setAddresses(data);
+      const defaultAddr = data.find((a: Address) => a.is_default);
+      if (defaultAddr) setSelectedAddressId(defaultAddr.id);
+      else if (data.length > 0) setSelectedAddressId(data[0].id);
+    } catch (error) {
+      console.error('Error fetching addresses:', error);
+      toast.error('Failed to load addresses');
+    } finally {
+      setLoadingAddresses(false);
+    }
+  };
+
+  const handleApplyCoupon = async () => {
+    if (!couponCode.trim()) return;
+    setIsValidatingCoupon(true);
+    try {
+      const response = await fetch('/api/coupons/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: couponCode })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        applyCoupon(data.code, data.discount);
+        toast.success(`Coupon applied! ${data.discount}% discount`);
+      } else {
+        const data = await response.json();
+        toast.error(data.error || 'Invalid coupon code');
+      }
+    } catch (error) {
+      console.error('Error validating coupon:', error);
+      toast.error('Failed to validate coupon');
+    } finally {
+      setIsValidatingCoupon(false);
+    }
+  };
+
+  const handleCheckout = async () => {
+    if (!selectedAddressId) {
+      toast.error('Please select a shipping address');
+      return;
+    }
+
     setIsProcessing(true);
-    setTimeout(() => {
+
+    try {
+      if (paymentMethod === 'card') {
+        const response = await fetch('/api/payment/checkout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user?.id || 'guest',
+            cartItems: cart.map(item => ({
+              id: item.id,
+              name: item.name,
+              price: item.price,
+              quantity: item.quantity,
+              image: item.image
+            })),
+            addressId: selectedAddressId,
+            totalPrice: total
+          }),
+        });
+
+        const { url } = await response.json();
+        if (url) {
+          window.location.href = url;
+        } else {
+          throw new Error('Failed to create checkout session');
+        }
+      } else {
+        // Handle COD or other methods
+        const response = await fetch('/api/payment/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user?.id || 'guest',
+            addressId: selectedAddressId,
+            totalPrice: total,
+            paymentMethod: paymentMethod.toUpperCase(),
+            cartItems: cart.map(item => ({
+              id: item.id,
+              price: item.price,
+              quantity: item.quantity
+            }))
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setOrderId(data.orderId);
+          setIsSuccess(true);
+          clearCart();
+          toast.success('Order placed successfully!');
+        } else {
+          throw new Error('Failed to place order');
+        }
+      }
+    } catch (error) {
+      console.error('Checkout error:', error);
+      toast.error('Something went wrong. Please try again.');
+    } finally {
       setIsProcessing(false);
-      setIsSuccess(true);
-      clearCart();
-    }, 2000);
+    }
   };
 
   if (cart.length === 0 && !isSuccess) {
@@ -46,11 +178,11 @@ export default function Checkout() {
           </div>
           <h2 className="text-3xl font-bold text-gray-900 mb-4">Order Confirmed!</h2>
           <p className="text-gray-500 mb-10">
-            Thank you for your purchase. Your order #OK-98234 has been placed successfully and will be shipped soon.
+            Thank you for your purchase. Your order {orderId ? `#${orderId}` : ''} has been placed successfully and will be shipped soon.
           </p>
           <div className="space-y-4">
             <Link
-              to="/profile"
+              to={orderId ? `/order-tracking/${orderId}` : "/profile"}
               className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-500 transition-all block text-center shadow-lg shadow-emerald-600/20"
             >
               Track Order
@@ -97,35 +229,53 @@ export default function Checkout() {
                   Shipping Address
                 </h3>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 mb-8 sm:mb-10">
-                  <div 
-                    onClick={() => setSelectedAddressId('1')}
-                    className={cn(
-                      "p-4 sm:p-6 rounded-3xl border-2 transition-all cursor-pointer",
-                      selectedAddressId === '1' ? "border-emerald-600 bg-emerald-50/30" : "border-black/5 bg-gray-50 hover:bg-white hover:shadow-xl"
-                    )}
-                  >
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm">
-                        <MapPin size={20} className="text-emerald-600" />
-                      </div>
-                      {selectedAddressId === '1' && <div className="w-6 h-6 rounded-full border-4 border-emerald-600 bg-white"></div>}
-                    </div>
-                    <p className="font-bold text-gray-900">Home</p>
-                    <p className="text-sm text-gray-500 leading-relaxed">
-                      123 Commerce St, Digital City, DC 10101, United States
-                    </p>
+                {loadingAddresses ? (
+                  <div className="flex justify-center py-12">
+                    <Loader2 className="animate-spin text-emerald-600" size={32} />
                   </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 mb-8 sm:mb-10">
+                    {addresses.map((addr) => (
+                      <div 
+                        key={addr.id}
+                        onClick={() => setSelectedAddressId(addr.id)}
+                        className={cn(
+                          "p-4 sm:p-6 rounded-3xl border-2 transition-all cursor-pointer",
+                          selectedAddressId === addr.id ? "border-emerald-600 bg-emerald-50/30" : "border-black/5 bg-gray-50 hover:bg-white hover:shadow-xl"
+                        )}
+                      >
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-sm">
+                            <MapPin size={20} className="text-emerald-600" />
+                          </div>
+                          {selectedAddressId === addr.id && <div className="w-6 h-6 rounded-full border-4 border-emerald-600 bg-white"></div>}
+                        </div>
+                        <p className="font-bold text-gray-900 capitalize">{addr.type}</p>
+                        <p className="text-sm text-gray-500 leading-relaxed">
+                          {addr.street}, {addr.city}, {addr.state} {addr.zip_code}, {addr.country}
+                        </p>
+                      </div>
+                    ))}
 
-                  <Link to="/profile" className="p-4 sm:p-6 rounded-3xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center text-gray-400 hover:text-emerald-600 hover:border-emerald-600 transition-all group">
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-50 flex items-center justify-center mb-2 group-hover:bg-emerald-50 transition-colors">
-                      <ArrowRight size={24} />
-                    </div>
-                    <span className="text-sm font-bold">Add New Address</span>
-                  </Link>
-                </div>
+                    <Link to="/profile" className="p-4 sm:p-6 rounded-3xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center text-gray-400 hover:text-emerald-600 hover:border-emerald-600 transition-all group">
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gray-50 flex items-center justify-center mb-2 group-hover:bg-emerald-50 transition-colors">
+                        <Plus size={24} />
+                      </div>
+                      <span className="text-sm font-bold">Add New Address</span>
+                    </Link>
+                  </div>
+                )}
 
-                <button onClick={() => setStep(2)} className="w-full py-4 bg-black text-white rounded-2xl font-bold hover:bg-emerald-600 transition-all flex items-center justify-center group">
+                <button 
+                  onClick={() => {
+                    if (!selectedAddressId) {
+                      toast.error('Please select an address');
+                      return;
+                    }
+                    setStep(2);
+                  }} 
+                  className="w-full py-4 bg-black text-white rounded-2xl font-bold hover:bg-emerald-600 transition-all flex items-center justify-center group"
+                >
                   Continue to Payment
                   <ArrowRight size={20} className="ml-2 group-hover:translate-x-1 transition-transform" />
                 </button>
@@ -167,25 +317,6 @@ export default function Checkout() {
                   ))}
                 </div>
 
-                {paymentMethod === 'card' && (
-                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="space-y-4 pb-8 sm:pb-10">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1">Card Number</label>
-                      <input type="text" placeholder="**** **** **** 1234" className="w-full px-4 sm:px-6 py-4 bg-gray-50 border border-transparent rounded-2xl focus:outline-none focus:bg-white focus:border-emerald-600 transition-all text-sm sm:text-base" />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 sm:gap-6">
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1">Expiry Date</label>
-                        <input type="text" placeholder="MM/YY" className="w-full px-4 sm:px-6 py-4 bg-gray-50 border border-transparent rounded-2xl focus:outline-none focus:bg-white focus:border-emerald-600 transition-all text-sm sm:text-base" />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1">CVV</label>
-                        <input type="text" placeholder="***" className="w-full px-4 sm:px-6 py-4 bg-gray-50 border border-transparent rounded-2xl focus:outline-none focus:bg-white focus:border-emerald-600 transition-all text-sm sm:text-base" />
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-
                 <div className="flex flex-col sm:flex-row gap-4">
                   <button onClick={() => setStep(1)} className="w-full sm:w-auto px-8 py-4 bg-gray-100 text-gray-600 rounded-2xl font-bold hover:bg-gray-200 transition-all">Back</button>
                   <button onClick={() => setStep(3)} className="flex-1 py-4 bg-black text-white rounded-2xl font-bold hover:bg-emerald-600 transition-all flex items-center justify-center group">
@@ -206,7 +337,9 @@ export default function Checkout() {
                   <div className="p-4 sm:p-6 bg-gray-50 rounded-3xl border border-black/5">
                     <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">Shipping to:</h4>
                     <p className="text-gray-900 font-bold text-sm sm:text-base">{user?.fullName || 'User'}</p>
-                    <p className="text-gray-500 text-xs sm:text-sm">123 Commerce St, Digital City, 10101</p>
+                    <p className="text-gray-500 text-xs sm:text-sm">
+                      {addresses.find(a => a.id === selectedAddressId)?.street}, {addresses.find(a => a.id === selectedAddressId)?.city}
+                    </p>
                   </div>
                   <div className="p-4 sm:p-6 bg-gray-50 rounded-3xl border border-black/5">
                     <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4">Payment Method:</h4>
@@ -246,10 +379,42 @@ export default function Checkout() {
                 ))}
               </div>
               <div className="space-y-4 pt-6 border-t border-black/5">
+                {/* Coupon Input */}
+                <div className="mb-6">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Coupon Code"
+                      value={couponCode}
+                      onChange={(e) => setCouponCode(e.target.value)}
+                      className="flex-1 px-4 py-2 bg-gray-50 border border-black/5 rounded-xl focus:outline-none focus:border-emerald-600 text-sm"
+                    />
+                    <button
+                      onClick={handleApplyCoupon}
+                      disabled={isValidatingCoupon || !couponCode.trim()}
+                      className="px-4 py-2 bg-black text-white rounded-xl font-bold text-sm hover:bg-emerald-600 transition-all disabled:opacity-50"
+                    >
+                      {isValidatingCoupon ? <Loader2 className="animate-spin" size={16} /> : 'Apply'}
+                    </button>
+                  </div>
+                  {coupon && (
+                    <div className="mt-2 flex items-center justify-between text-xs bg-emerald-50 text-emerald-700 px-3 py-2 rounded-lg">
+                      <span>Applied: <strong>{coupon.code}</strong> ({coupon.discount}% off)</span>
+                      <button onClick={removeCoupon} className="hover:text-emerald-900 font-bold">Remove</button>
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex justify-between text-gray-500 text-sm">
                   <span>Subtotal</span>
                   <span className="font-bold text-gray-900">₹{cartTotal.toLocaleString('en-IN')}</span>
                 </div>
+                {coupon && (
+                  <div className="flex justify-between text-emerald-600 text-sm">
+                    <span>Discount ({coupon.discount}%)</span>
+                    <span className="font-bold">-₹{(cartTotal - discountedTotal).toLocaleString('en-IN')}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-gray-500 text-sm">
                   <span>Shipping</span>
                   <span className="font-bold text-gray-900">{shipping === 0 ? 'Free' : `₹${shipping.toLocaleString('en-IN')}`}</span>

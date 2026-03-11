@@ -5,9 +5,11 @@ import { useState, useEffect } from 'react';
 import { useCart } from '../CartContext';
 import { useToast } from '../ToastContext';
 import { cn } from '../utils';
+import { useUser } from '@clerk/clerk-react';
 
 export default function ProductDetail() {
   const { id } = useParams();
+  const { user } = useUser();
   const [product, setProduct] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [quantity, setQuantity] = useState(1);
@@ -15,9 +17,77 @@ export default function ProductDetail() {
   const { showToast } = useToast();
   const [isWishlisted, setIsWishlisted] = useState(false);
 
+  const [relatedProducts, setRelatedProducts] = useState<any[]>([]);
+  const [comments, setComments] = useState<any[]>([]);
+  const [newComment, setNewComment] = useState('');
+
   useEffect(() => {
     fetchProduct();
+    checkWishlist();
+    fetchComments();
   }, [id]);
+
+  useEffect(() => {
+    if (product) {
+      fetchRelatedProducts();
+    }
+  }, [product]);
+
+  const fetchComments = async () => {
+    try {
+      const response = await fetch(`/api/reviews/${id}`);
+      if (response.ok) {
+        const data = await response.json();
+        setComments(data);
+      }
+    } catch (error) {
+      console.error('Error fetching comments:', error);
+    }
+  };
+
+  const handleAddComment = async () => {
+    if (!user) {
+      showToast("Please sign in to comment");
+      return;
+    }
+    if (!newComment.trim()) return;
+
+    try {
+      const response = await fetch('/api/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId: id,
+          userId: user.id,
+          userName: user.fullName || user.username,
+          rating: 5,
+          comment: newComment
+        })
+      });
+      if (response.ok) {
+        setNewComment('');
+        fetchComments();
+        showToast("Comment added!");
+      }
+    } catch (error) {
+      console.error('Error adding comment:', error);
+    }
+  };
+
+  const fetchRelatedProducts = async () => {
+    try {
+      const response = await fetch('/api/products');
+      if (response.ok) {
+        const allProducts = await response.json();
+        const related = allProducts
+          .filter((p: any) => p.category === product.category && p.id !== product.id)
+          .slice(0, 4);
+        setRelatedProducts(related);
+      }
+    } catch (error) {
+      console.error('Error fetching related products:', error);
+    }
+  };
 
   const fetchProduct = async () => {
     setIsLoading(true);
@@ -40,9 +110,53 @@ export default function ProductDetail() {
     showToast(`Added ${quantity} ${product.name} to cart!`);
   };
 
-  const toggleWishlist = () => {
-    setIsWishlisted(!isWishlisted);
-    showToast(isWishlisted ? "Removed from wishlist" : "Added to wishlist");
+  const handleBuyNow = () => {
+    if (!product) return;
+    addToCart(product, quantity);
+    window.location.href = '/cart';
+  };
+
+  const checkWishlist = async () => {
+    if (!user) return;
+    try {
+      const response = await fetch(`/api/user/wishlist/${user.id}`);
+      if (response.ok) {
+        const data = await response.json();
+        setIsWishlisted(data.some((item: any) => item.id === id));
+      }
+    } catch (error) {
+      console.error('Error checking wishlist:', error);
+    }
+  };
+
+  const toggleWishlist = async () => {
+    if (!user) {
+      showToast("Please sign in to save items");
+      return;
+    }
+
+    const method = isWishlisted ? 'DELETE' : 'POST';
+    const url = isWishlisted 
+      ? `/api/user/wishlist/${user.id}/${id}` 
+      : '/api/user/wishlist';
+      
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: method === 'POST' ? JSON.stringify({ userId: user.id, productId: id }) : undefined,
+      });
+
+      if (response.ok) {
+        setIsWishlisted(!isWishlisted);
+        showToast(isWishlisted ? "Removed from wishlist" : "Added to wishlist");
+      } else {
+        throw new Error('Failed to update wishlist');
+      }
+    } catch (error) {
+      console.error('Error updating wishlist:', error);
+      showToast("Failed to update wishlist");
+    }
   };
 
   if (isLoading) {
@@ -132,8 +246,23 @@ export default function ProductDetail() {
             </div>
 
             <p className="text-gray-600 mb-8 sm:mb-10 leading-relaxed text-sm sm:text-base">
-              {product.description} Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+              {product.description}
             </p>
+
+            {/* Store Info */}
+            <div className="mb-8 p-6 bg-gray-50 rounded-3xl border border-black/5">
+              <div className="flex items-center gap-4 mb-4">
+                <img src={product.store_logo} alt={product.store_name} className="w-12 h-12 rounded-xl object-cover border border-black/5" referrerPolicy="no-referrer" />
+                <div>
+                  <h4 className="font-bold text-gray-900">{product.store_name}</h4>
+                  <p className="text-xs text-gray-500">Partner since {new Date(product.tie_up_date).toLocaleDateString()}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-emerald-600">
+                <Shield size={16} />
+                <span className="text-xs font-bold uppercase tracking-widest">Verified Store</span>
+              </div>
+            </div>
 
             <div className="space-y-6 mb-8 sm:mb-10">
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
@@ -155,10 +284,16 @@ export default function ProductDetail() {
                 <div className="flex gap-4 flex-1">
                   <button 
                     onClick={handleAddToCart}
-                    className="flex-1 py-4 bg-black text-white rounded-2xl font-bold hover:bg-emerald-600 transition-all shadow-xl shadow-black/10 flex items-center justify-center group"
+                    className="flex-1 py-4 border-2 border-black text-black rounded-2xl font-bold hover:bg-black hover:text-white transition-all flex items-center justify-center group"
                   >
                     <ShoppingCart size={20} className="mr-2" />
                     Add to Cart
+                  </button>
+                  <button 
+                    onClick={handleBuyNow}
+                    className="flex-1 py-4 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-600/20 flex items-center justify-center group"
+                  >
+                    Buy Now
                   </button>
                   <button 
                     onClick={toggleWishlist}
@@ -205,6 +340,78 @@ export default function ProductDetail() {
             </div>
           </motion.div>
         </div>
+
+        {/* Comments Section */}
+        <div className="mt-24">
+          <h2 className="text-3xl font-bold mb-10">Customer Reviews</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-16">
+            <div className="lg:col-span-1">
+              <div className="bg-gray-50 p-8 rounded-[40px] border border-black/5 sticky top-32">
+                <h3 className="text-xl font-bold mb-4">Add a Review</h3>
+                <p className="text-gray-500 text-sm mb-6">Share your experience with this product.</p>
+                <textarea
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  placeholder="What do you think about this product?"
+                  className="w-full p-4 bg-white border border-black/5 rounded-2xl h-32 focus:outline-none focus:border-emerald-600 transition-all mb-4"
+                />
+                <button
+                  onClick={handleAddComment}
+                  className="w-full py-4 bg-black text-white rounded-2xl font-bold hover:bg-emerald-600 transition-all"
+                >
+                  Post Review
+                </button>
+              </div>
+            </div>
+            <div className="lg:col-span-2 space-y-8">
+              {comments.length > 0 ? (
+                comments.map((comment) => (
+                  <div key={comment.id} className="p-8 bg-white border border-black/5 rounded-[40px] shadow-sm">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center font-bold">
+                          {comment.user_name?.charAt(0)}
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-gray-900">{comment.user_name}</h4>
+                          <p className="text-xs text-gray-500">{new Date(comment.created_at).toLocaleDateString()}</p>
+                        </div>
+                      </div>
+                      <div className="flex text-amber-500">
+                        {[1, 2, 3, 4, 5].map((s) => (
+                          <Star key={s} size={14} fill={s <= comment.rating ? "currentColor" : "none"} />
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-gray-600 leading-relaxed">{comment.comment}</p>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-20 bg-gray-50 rounded-[40px] border border-dashed border-gray-200">
+                  <p className="text-gray-500 font-medium">No reviews yet. Be the first to review!</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Related Products */}
+        {relatedProducts.length > 0 && (
+          <div className="mt-24">
+            <h2 className="text-3xl font-bold mb-10">Related Products</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+              {relatedProducts.map((p) => (
+                <Link key={p.id} to={`/product/${p.id}`} className="group">
+                  <div className="aspect-square rounded-3xl overflow-hidden bg-gray-100 mb-4 border border-black/5">
+                    <img src={p.image} alt={p.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" />
+                  </div>
+                  <h3 className="font-bold text-gray-900 group-hover:text-emerald-600 transition-colors">{p.name}</h3>
+                  <p className="text-emerald-600 font-bold">₹{p.price.toLocaleString('en-IN')}</p>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

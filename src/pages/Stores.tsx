@@ -1,10 +1,44 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Star, Users, Calendar, ArrowRight, Store } from 'lucide-react';
+import { Star, Users, Calendar, ArrowRight, Store, Search } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { SAMPLE_SELLERS } from '../constants';
 
 export default function Stores() {
+  const [stores, setStores] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  useEffect(() => {
+    fetchStores();
+  }, []);
+
+  const fetchStores = async () => {
+    try {
+      const response = await fetch('/api/store/approved');
+      if (response.ok) {
+        const data = await response.json();
+        setStores(data);
+      }
+    } catch (error) {
+      console.error('Error fetching stores:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const filteredStores = stores.filter(s => 
+    s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    s.description.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  if (isLoading) {
+    return (
+      <div className="pt-32 pb-20 min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <div className="pt-32 pb-20 bg-gray-50 min-h-screen">
       <div className="max-w-7xl mx-auto px-6">
@@ -18,13 +52,24 @@ export default function Stores() {
             Verified Stores
           </motion.div>
           <h1 className="text-5xl font-bold tracking-tight text-gray-900 mb-4">Our Top Stores</h1>
-          <p className="text-gray-500 max-w-2xl mx-auto">
+          <p className="text-gray-500 max-w-2xl mx-auto mb-10">
             Discover and follow your favorite brands. Shop directly from verified official stores for the best quality and service.
           </p>
+
+          <div className="relative max-w-xl mx-auto">
+            <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+            <input
+              type="text"
+              placeholder="Search stores by name or description..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-16 pr-8 py-5 bg-white border border-black/5 rounded-[32px] shadow-xl shadow-black/5 focus:outline-none focus:border-emerald-600 transition-all font-medium"
+            />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {SAMPLE_SELLERS.map((seller, i) => (
+          {filteredStores.map((seller, i) => (
             <motion.div
               key={seller.id}
               initial={{ opacity: 0, y: 20 }}
@@ -33,17 +78,17 @@ export default function Stores() {
               className="bg-white rounded-[40px] p-8 border border-black/5 shadow-sm hover:shadow-xl transition-all duration-500 group"
             >
               <div className="flex items-start justify-between mb-6">
-                <div className="w-20 h-20 rounded-3xl overflow-hidden border border-gray-100 shadow-inner">
+                <div className="w-20 h-20 rounded-3xl overflow-hidden border border-gray-100 shadow-inner p-2 bg-gray-50">
                   <img
                     src={seller.logo}
                     alt={seller.name}
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-contain"
                     referrerPolicy="no-referrer"
                   />
                 </div>
                 <div className="flex items-center gap-1 px-3 py-1 bg-amber-50 text-amber-600 rounded-full text-xs font-bold">
                   <Star size={12} fill="currentColor" />
-                  {seller.rating}
+                  {seller.rating || '4.5'}
                 </div>
               </div>
 
@@ -57,16 +102,16 @@ export default function Stores() {
               <div className="grid grid-cols-2 gap-4 mb-8">
                 <div className="flex items-center gap-2 text-gray-400">
                   <Users size={16} />
-                  <span className="text-xs font-medium">{seller.followers} Followers</span>
+                  <span className="text-xs font-medium">{seller.followers || '1.2k'} Followers</span>
                 </div>
                 <div className="flex items-center gap-2 text-gray-400">
                   <Calendar size={16} />
-                  <span className="text-xs font-medium">Since {seller.joinedDate}</span>
+                  <span className="text-xs font-medium">Since {new Date(seller.created_at).getFullYear()}</span>
                 </div>
               </div>
 
               <Link
-                to={`/store/${seller.brand}`}
+                to={`/store/${seller.id}`}
                 className="flex items-center justify-center gap-2 w-full py-4 bg-gray-50 text-gray-900 rounded-2xl font-bold hover:bg-black hover:text-white transition-all group/btn"
               >
                 Visit Store
@@ -75,6 +120,14 @@ export default function Stores() {
             </motion.div>
           ))}
         </div>
+
+        {filteredStores.length === 0 && (
+          <div className="text-center py-20">
+            <Store size={48} className="mx-auto text-gray-200 mb-4" />
+            <h3 className="text-xl font-bold text-gray-900 mb-2">No stores found</h3>
+            <p className="text-gray-500">Try adjusting your search query.</p>
+          </div>
+        )}
 
         {/* Become a Store CTA */}
         <motion.div

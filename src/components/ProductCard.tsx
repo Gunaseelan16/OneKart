@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useUser } from '@clerk/clerk-react';
 import { Star, ShoppingCart, Heart } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Product } from '../types';
@@ -14,7 +15,24 @@ interface ProductCardProps {
 export default function ProductCard({ product }: ProductCardProps) {
   const { addToCart } = useCart();
   const { showToast } = useToast();
+  const { user } = useUser();
   const [isWishlisted, setIsWishlisted] = useState(false);
+
+  useEffect(() => {
+    const checkWishlist = async () => {
+      if (!user) return;
+      try {
+        const response = await fetch(`/api/user/wishlist/${user.id}`);
+        if (response.ok) {
+          const wishlist = await response.json();
+          setIsWishlisted(wishlist.some((item: any) => item.id === product.id));
+        }
+      } catch (error) {
+        console.error('Error checking wishlist:', error);
+      }
+    };
+    checkWishlist();
+  }, [product.id]);
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -22,10 +40,35 @@ export default function ProductCard({ product }: ProductCardProps) {
     showToast(`Added ${product.name} to cart!`);
   };
 
-  const toggleWishlist = (e: React.MouseEvent) => {
+  const toggleWishlist = async (e: React.MouseEvent) => {
     e.preventDefault();
-    setIsWishlisted(!isWishlisted);
-    showToast(isWishlisted ? "Removed from wishlist" : "Added to wishlist");
+    if (!user) {
+      showToast("Please sign in to save items");
+      return;
+    }
+
+    const method = isWishlisted ? 'DELETE' : 'POST';
+    const url = isWishlisted 
+      ? `/api/user/wishlist/${user.id}/${product.id}` 
+      : '/api/user/wishlist';
+      
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: method === 'POST' ? JSON.stringify({ userId: user.id, productId: product.id }) : undefined,
+      });
+
+      if (response.ok) {
+        setIsWishlisted(!isWishlisted);
+        showToast(isWishlisted ? "Removed from wishlist" : "Added to wishlist");
+      } else {
+        throw new Error('Failed to update wishlist');
+      }
+    } catch (error) {
+      console.error('Error updating wishlist:', error);
+      showToast("Failed to update wishlist");
+    }
   };
 
   return (

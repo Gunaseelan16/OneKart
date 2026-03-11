@@ -21,19 +21,21 @@ import {
   Lock,
   Mail,
   ArrowRight,
-  AlertCircle
+  AlertCircle,
+  Star,
+  MessageSquare
 } from 'lucide-react';
 import { cn } from '../utils';
 import { useNavigate, Link } from 'react-router-dom';
-import { useUser, useAuth, useClerk } from '@clerk/clerk-react';
 import { useToast } from '../ToastContext';
+import { useUser, useAuth } from '@clerk/clerk-react';
 
 const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || 'gunaseelanrk25@gmail.com';
 
 export default function AdminDashboard() {
   const { user, isLoaded } = useUser();
-  const { getToken } = useAuth();
-  const { signOut } = useClerk();
+  const { getToken, signOut } = useAuth();
+  
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 1024);
   const { showToast } = useToast();
@@ -42,6 +44,7 @@ export default function AdminDashboard() {
   const [stores, setStores] = useState<any[]>([]);
   const [pendingStores, setPendingStores] = useState<any[]>([]);
   const [coupons, setCoupons] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [newCoupon, setNewCoupon] = useState({ code: '', discount: '', expiry: '' });
   const [isLoading, setIsLoading] = useState(true);
@@ -79,13 +82,17 @@ export default function AdminDashboard() {
         'x-clerk-email': user?.primaryEmailAddress?.emailAddress || ''
       };
 
-      const [storesRes, pendingRes] = await Promise.all([
+      const [storesRes, pendingRes, couponsRes, reviewsRes] = await Promise.all([
         fetch('/api/admin/stores', { headers }),
-        fetch('/api/admin/stores/pending', { headers })
+        fetch('/api/admin/stores/pending', { headers }),
+        fetch('/api/coupons', { headers }),
+        fetch('/api/admin/reviews', { headers })
       ]);
 
       if (storesRes.ok) setStores(await storesRes.json());
       if (pendingRes.ok) setPendingStores(await pendingRes.json());
+      if (couponsRes.ok) setCoupons(await couponsRes.json());
+      if (reviewsRes.ok) setReviews(await reviewsRes.json());
     } catch (error) {
       console.error('Error fetching admin data:', error);
       showToast('Failed to load dashboard data', 'error');
@@ -107,7 +114,7 @@ export default function AdminDashboard() {
       });
 
       if (response.ok) {
-        showToast(`${store.store_name} approved successfully`, 'success');
+        showToast(`${store.name} approved successfully`, 'success');
         fetchData();
       } else {
         showToast('Failed to approve store', 'error');
@@ -130,7 +137,7 @@ export default function AdminDashboard() {
       });
 
       if (response.ok) {
-        showToast(`${store.store_name} rejected`, 'error');
+        showToast(`${store.name} rejected`, 'error');
         fetchData();
       } else {
         showToast('Failed to reject store', 'error');
@@ -140,24 +147,69 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleCreateCoupon = (e: React.FormEvent) => {
+  const handleCreateCoupon = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCoupon.code || !newCoupon.discount || !newCoupon.expiry) {
       showToast('Please fill all coupon fields', 'error');
       return;
     }
-    setCoupons([{ ...newCoupon, discount: `${newCoupon.discount}%`, status: 'Active' }, ...coupons]);
-    setNewCoupon({ code: '', discount: '', expiry: '' });
-    showToast('Coupon created successfully', 'success');
+    
+    try {
+      const token = await getToken();
+      const response = await fetch('/api/coupons', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-clerk-id': user?.id || '',
+          'x-clerk-email': user?.primaryEmailAddress?.emailAddress || ''
+        },
+        body: JSON.stringify({
+          code: newCoupon.code,
+          discount: parseFloat(newCoupon.discount),
+          expiryDate: newCoupon.expiry
+        })
+      });
+
+      if (response.ok) {
+        showToast('Coupon created successfully', 'success');
+        setNewCoupon({ code: '', discount: '', expiry: '' });
+        fetchData();
+      } else {
+        showToast('Failed to create coupon', 'error');
+      }
+    } catch (error) {
+      console.error('Error creating coupon:', error);
+      showToast('Error creating coupon', 'error');
+    }
   };
 
-  const handleDeleteCoupon = (code: string) => {
-    setCoupons(coupons.filter(c => c.code !== code));
-    showToast('Coupon deleted', 'success');
+  const handleDeleteCoupon = async (id: string) => {
+    try {
+      const token = await getToken();
+      const response = await fetch(`/api/coupons/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-clerk-id': user?.id || '',
+          'x-clerk-email': user?.primaryEmailAddress?.emailAddress || ''
+        }
+      });
+
+      if (response.ok) {
+        showToast('Coupon deleted', 'success');
+        fetchData();
+      } else {
+        showToast('Failed to delete coupon', 'error');
+      }
+    } catch (error) {
+      console.error('Error deleting coupon:', error);
+      showToast('Error deleting coupon', 'error');
+    }
   };
 
   const filteredStores = stores.filter(s => 
-    s.store_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     s.owner_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
     s.email.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -208,6 +260,7 @@ export default function AdminDashboard() {
               { id: 'stores', label: 'Stores', icon: Store },
               { id: 'approval', label: 'Approval Store', icon: CheckCircle2 },
               { id: 'coupon', label: 'Coupon', icon: Tag },
+              { id: 'reviews', label: 'Reviews', icon: MessageSquare },
             ].map((item) => (
               <button
                 key={item.id}
@@ -342,9 +395,10 @@ export default function AdminDashboard() {
                   <table className="w-full">
                     <thead>
                       <tr className="text-left border-b border-gray-100">
-                        <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Store Name</th>
+                        <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Store</th>
                         <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Owner Name</th>
                         <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Email</th>
+                        <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Products</th>
                         <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Status</th>
                         <th className="px-8 py-6 text-right"></th>
                       </tr>
@@ -353,11 +407,23 @@ export default function AdminDashboard() {
                       {filteredStores.map((store) => (
                         <tr key={store.id} className="group hover:bg-gray-50/50 transition-colors">
                           <td className="px-8 py-6">
-                            <p className="font-bold text-gray-900">{store.store_name}</p>
-                            <p className="text-xs text-gray-400 uppercase tracking-widest">{store.id}</p>
+                            <div className="flex items-center gap-4">
+                              <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center overflow-hidden border border-black/5">
+                                {store.logo ? (
+                                  <img src={store.logo} alt={store.name} className="w-full h-full object-cover" />
+                                ) : (
+                                  <Store size={20} className="text-gray-400" />
+                                )}
+                              </div>
+                              <div>
+                                <p className="font-bold text-gray-900">{store.name}</p>
+                                <p className="text-[10px] text-gray-400 uppercase tracking-widest">ID: {store.id}</p>
+                              </div>
+                            </div>
                           </td>
-                          <td className="px-8 py-6 font-medium text-gray-600">{store.owner_id}</td>
+                          <td className="px-8 py-6 font-medium text-gray-600">{store.owner_name}</td>
                           <td className="px-8 py-6 font-medium text-gray-600">{store.email}</td>
+                          <td className="px-8 py-6 font-bold text-gray-900">{store.product_count}</td>
                           <td className="px-8 py-6">
                             <span className={cn(
                               "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest",
@@ -367,7 +433,10 @@ export default function AdminDashboard() {
                             </span>
                           </td>
                           <td className="px-8 py-6 text-right">
-                            <button className="p-2 hover:bg-white rounded-xl transition-colors shadow-sm opacity-0 group-hover:opacity-100">
+                            <button 
+                              onClick={() => navigate(`/admin/store/${store.id}`)}
+                              className="p-2 hover:bg-white rounded-xl transition-colors shadow-sm opacity-0 group-hover:opacity-100"
+                            >
                               <MoreVertical size={18} className="text-gray-400" />
                             </button>
                           </td>
@@ -398,14 +467,14 @@ export default function AdminDashboard() {
                       <div className="flex items-start justify-between mb-6">
                         <div className="flex items-center gap-4">
                           <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center text-gray-400 overflow-hidden">
-                            {store.logo_url ? (
-                              <img src={store.logo_url} alt={store.store_name} className="w-full h-full object-cover" />
+                            {store.logo ? (
+                              <img src={store.logo} alt={store.name} className="w-full h-full object-cover" />
                             ) : (
                               <Store size={28} />
                             )}
                           </div>
                           <div>
-                            <h3 className="text-xl font-bold text-gray-900">{store.store_name}</h3>
+                            <h3 className="text-xl font-bold text-gray-900">{store.name}</h3>
                             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{store.id}</p>
                           </div>
                         </div>
@@ -518,22 +587,22 @@ export default function AdminDashboard() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50">
-                          {coupons.map((coupon, i) => (
-                            <tr key={i} className="group hover:bg-gray-50/50 transition-colors">
+                          {coupons.map((coupon) => (
+                            <tr key={coupon.id} className="group hover:bg-gray-50/50 transition-colors">
                               <td className="px-8 py-6 font-bold text-gray-900">{coupon.code}</td>
-                              <td className="px-8 py-6 font-bold text-emerald-600">{coupon.discount}</td>
-                              <td className="px-8 py-6 text-sm text-gray-500">{coupon.expiry}</td>
+                              <td className="px-8 py-6 font-bold text-emerald-600">{coupon.discount}%</td>
+                              <td className="px-8 py-6 text-sm text-gray-500">{new Date(coupon.expiry_date).toLocaleDateString()}</td>
                               <td className="px-8 py-6">
                                 <span className={cn(
                                   "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest",
-                                  coupon.status === 'Active' ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"
+                                  coupon.is_active ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"
                                 )}>
-                                  {coupon.status}
+                                  {coupon.is_active ? 'Active' : 'Inactive'}
                                 </span>
                               </td>
                               <td className="px-8 py-6 text-right">
                                 <button 
-                                  onClick={() => handleDeleteCoupon(coupon.code)}
+                                  onClick={() => handleDeleteCoupon(coupon.id)}
                                   className="p-2 hover:bg-rose-50 rounded-xl transition-colors shadow-sm opacity-0 group-hover:opacity-100 text-rose-500"
                                 >
                                   <Trash2 size={18} />
@@ -544,6 +613,66 @@ export default function AdminDashboard() {
                         </tbody>
                       </table>
                     </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+            {activeTab === 'reviews' && (
+              <motion.div
+                key="reviews"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="space-y-8"
+              >
+                <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Global Reviews</h1>
+                
+                <div className="bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="text-left border-b border-gray-100">
+                          <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Reviewer</th>
+                          <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Store</th>
+                          <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Product</th>
+                          <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Rating</th>
+                          <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Comment</th>
+                          <th className="px-8 py-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {reviews.map((review) => (
+                          <tr key={review.id} className="group hover:bg-gray-50/50 transition-colors">
+                            <td className="px-8 py-6">
+                              <p className="font-bold text-gray-900">{review.reviewer_name}</p>
+                              <p className="text-[10px] text-gray-400 uppercase tracking-widest">{review.reviewer_email}</p>
+                            </td>
+                            <td className="px-8 py-6 font-medium text-gray-600">{review.store_name}</td>
+                            <td className="px-8 py-6 font-medium text-gray-600">{review.product_name}</td>
+                            <td className="px-8 py-6">
+                              <div className="flex items-center gap-1">
+                                <Star size={14} className="fill-amber-400 text-amber-400" />
+                                <span className="font-bold text-gray-900">{review.rating}</span>
+                              </div>
+                            </td>
+                            <td className="px-8 py-6">
+                              <p className="text-sm text-gray-600 max-w-xs truncate">{review.comment}</p>
+                            </td>
+                            <td className="px-8 py-6 text-sm text-gray-500">
+                              {new Date(review.created_at).toLocaleDateString()}
+                            </td>
+                          </tr>
+                        ))}
+                        {reviews.length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="px-8 py-20 text-center">
+                              <MessageSquare size={40} className="mx-auto text-gray-200 mb-4" />
+                              <p className="text-gray-500 font-medium">No reviews found</p>
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               </motion.div>
